@@ -329,6 +329,9 @@ def init_env(
         cflags.append('-flto')
         ldflags.append('-flto')
 
+    ldflags.append('-L/opt/lib')
+    ldflags.append('-lsixel')
+
     if debug:
         cflags.append('-DKITTY_DEBUG_BUILD')
 

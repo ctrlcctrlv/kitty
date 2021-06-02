@@ -65,6 +65,7 @@
 #define OSC 0x9d
 #define PM 0x9e
 #define APC 0x9f
+#define SIXEL 0xa0
 
 // Sharp control codes
 // -------------------

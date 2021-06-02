@@ -108,7 +108,9 @@ typedef struct {
     uint32_t parser_buf[PARSER_BUF_SZ];
     unsigned int parser_state, parser_text_start, parser_buf_pos;
     bool parser_has_pending_text;
-    uint8_t read_buf[READ_BUF_SZ], *write_buf;
+    uint8_t read_buf[READ_BUF_SZ], *write_buf, *sixel_buf;
+    unsigned int read_buf_pos, sixel_buf_pos;
+
     monotonic_t new_input_at;
     size_t read_buf_sz, write_buf_sz, write_buf_used;
     pthread_mutex_t read_buf_lock, write_buf_lock;

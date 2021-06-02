@@ -270,6 +270,21 @@ typedef struct {FONTS_DATA_HEAD} *FONTS_DATA_HANDLE;
 
 #define PARSER_BUF_SZ (8 * 1024)
 #define READ_BUF_SZ (1024*1024)
+// This is a rough estimate of the worst case scenario for storing a 4k
+// image in sixel format with no RLE. Each sixel char represents a 1x6
+// rect. Assuming every single row of sixels has all 6 colors being used,
+// that's around six * 640 rows of 2160 characters. One more character
+// included for the marker starting the next line, three characters for
+// the color selection in the case of 256 colors = 644. Plus the color
+// definition header, in the worst case scenario 16 characters long, 256
+// times. All told, the worst case 4K image in sixels is 8350336 bytes
+// large, or just under 8MiB.
+//
+// In reality this is a little bit of an over-estimate. Sometimes the color
+// name will be one or two bytes long. So there's plenty of extra zeroes, and
+// because we limit the sixel size to 3840x2160, this won't ever overflow in a
+// well-formed image, especially if RLE is used.
+#define SIXEL_BUF_MAX (6*(644*2160))+(16*256)
 
 #define clear_sprite_position(cell) (cell).sprite_x = 0; (cell).sprite_y = 0; (cell).sprite_z = 0;
 

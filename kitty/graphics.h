@@ -124,3 +124,7 @@ void grman_rescale(GraphicsManager *self, CellPixelSize fg);
 void gpu_data_for_centered_image(ImageRenderData *ans, unsigned int screen_width_px, unsigned int screen_height_px, unsigned int width, unsigned int height);
 bool png_path_to_bitmap(const char *path, uint8_t** data, unsigned int* width, unsigned int* height, size_t* sz);
 bool scan_active_animations(GraphicsManager *self, const monotonic_t now, monotonic_t *minimum_gap, bool os_window_context_set);
+
+// These used to be static, but were added for sixel support. Use with care.
+uint32_t get_free_client_id(const GraphicsManager *self);
+Image* find_or_create_image(GraphicsManager *self, uint32_t id, bool *existing);

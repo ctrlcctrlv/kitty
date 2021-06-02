@@ -341,7 +341,7 @@ png_path_to_bitmap(const char* path, uint8_t** data, unsigned int* width, unsign
 }
 
 
-static inline Image*
+inline Image*
 find_or_create_image(GraphicsManager *self, uint32_t id, bool *existing) {
     if (id) {
         for (size_t i = 0; i < self->image_count; i++) {
@@ -358,7 +358,7 @@ find_or_create_image(GraphicsManager *self, uint32_t id, bool *existing) {
     return ans;
 }
 
-static inline uint32_t
+inline uint32_t
 get_free_client_id(const GraphicsManager *self) {
     if (!self->image_count) return 1;
     uint32_t *client_ids = malloc(sizeof(uint32_t) * self->image_count);

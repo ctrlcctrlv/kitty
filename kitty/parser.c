@@ -13,7 +13,11 @@
 #include "graphics.h"
 #include "charsets.h"
 #include "monotonic.h"
+#include <sys/mman.h>
+#include <fcntl.h>
 #include <time.h>
+
+#include <sixel.h>
 
 extern PyTypeObject Screen_Type;
 
@@ -250,6 +254,9 @@ handle_esc_mode_char(Screen *screen, uint32_t ch, PyObject DUMP_UNUSED *dump_cal
                 case ' ':
                 case '#':
                     screen->parser_buf[screen->parser_buf_pos++] = ch;
+                    break;
+                case ESC_ST:
+                    CALL_ED(screen_nel);
                     break;
                 default:
                     REPORT_ERROR("%s0x%x", "Unknown char after ESC: ", ch);
@@ -1074,6 +1081,62 @@ dispatch_pm(Screen *screen, PyObject DUMP_UNUSED *dump_callback) {
     }
 }
 
+static inline void
+dispatch_sixel(Screen *screen, PyObject DUMP_UNUSED *dump_callback) {
+    unsigned char* pixels = NULL;
+    int width;
+    int height;
+    unsigned char* palette = NULL;
+    int ncolors;
+
+    SIXELSTATUS status = sixel_decode_raw(screen->sixel_buf, screen->sixel_buf_pos, &pixels, &width, &height, &palette, &ncolors, NULL);
+    if (status != SIXEL_OK) {
+        REPORT_ERROR("Failed to decode sixel data: %s\n", sixel_helper_format_error(status));
+        return;
+    }
+
+    uint32_t iid = get_free_client_id(screen->grman);
+    GraphicsCommand *g = calloc(1, sizeof(GraphicsCommand));
+    memset(g, 0, sizeof(GraphicsCommand));
+    g->action = 'T';
+    g->transmission_type = 'd';
+    g->delete_action = 'a';
+    g->format = 24; // all sixels are RGB, right?
+    g->more = 0;
+    g->id = iid;
+    g->data_sz = width*height*3;
+    g->quiet = 1;
+    g->cursor_movement = 0;
+    g->width = g->data_width = width;
+    g->height = g->data_height = height;
+    g->num_cells = width / screen->cell_size.width;
+    g->num_lines = height / screen->cell_size.height;
+    g->payload_sz = width*height*3;
+    g->z_index = 2;
+    
+    // We need to expand the data. `sixel_decode_raw` gives us indexed bitmap data, not RGB as expected by grman_handle_command.
+    uint8_t* payload = malloc(g->payload_sz+1);
+    unsigned int payload_pos = 0;
+
+    for (int p = 0; p < width*height; p++) {
+        int pix = pixels[p]; // value of the current pixel
+        int r = palette[pix*3+0];
+        int g = palette[pix*3+1];
+        int b = palette[pix*3+2];
+        payload[payload_pos++] = r;
+        payload[payload_pos++] = g;
+        payload[payload_pos++] = b;
+    }
+
+    grman_clear(screen->grman, false, screen->cell_size);
+    grman_clear(screen->main_grman, false, screen->cell_size);
+    screen_handle_graphics_command(screen, g, payload);
+
+    //printf("\n\n%d\n\n%.*s\n\n", screen->sixel_buf_pos, screen->sixel_buf_pos, screen->sixel_buf);
+    screen->sixel_buf_pos = 0;
+    free(screen->sixel_buf);
+    screen->sixel_buf = NULL;
+}
 
 // }}}
 
@@ -1107,16 +1170,45 @@ accumulate_osc(Screen *screen, uint32_t ch, PyObject DUMP_UNUSED *dump_callback)
 }
 
 static inline bool
+accumulate_sixel(Screen *screen, uint32_t ch) {
+    if (ch == ESC) {
+        screen->sixel_buf[screen->sixel_buf_pos++] = ESC;
+        screen->sixel_buf[screen->sixel_buf_pos++] = '\\';
+        return true;
+    } else {
+        if (screen->sixel_buf == NULL) {
+            screen->sixel_buf = malloc(SIXEL_BUF_MAX);
+            // We have to rewrite this header because it's already consumed by
+            // the time we get here, but libsixel won't recognize the data
+            // without it.
+            screen->sixel_buf[0] = ESC;
+            screen->sixel_buf[1] = 'P';
+            screen->sixel_buf[2] = 'q';
+            screen->sixel_buf_pos = 3;
+        }
+        screen->sixel_buf[screen->sixel_buf_pos++] = ch;
+        return false;
+    }
+}
+
+#define SIXEL_CHAR 'q'
+
+static inline bool
 accumulate_dcs(Screen *screen, uint32_t ch, PyObject DUMP_UNUSED *dump_callback) {
     switch(ch) {
         case ST:
             return true;
+        case SIXEL_CHAR:
+            SET_STATE(SIXEL); // → accumulate_sixel
+            screen->parser_buf[screen->parser_buf_pos++] = ch;
+            return false;
         case NUL:
         case DEL:
             break;
         case ESC:
 START_ALLOW_CASE_RANGE
-        case 32 ... 126:
+	case 32 ... 112:
+	case 114 ... 126:
 END_ALLOW_CASE_RANGE
             if (screen->parser_buf_pos > 0 && screen->parser_buf[screen->parser_buf_pos-1] == ESC) {
                 if (ch == '\\') { screen->parser_buf_pos--; return true; }
@@ -1233,6 +1325,7 @@ END_ALLOW_CASE_RANGE
 
 #define dispatch_unicode_char(codepoint, watch_for_pending) { \
     switch(screen->parser_state) { \
+        case ESC_ST: \
         case ESC: \
             handle_esc_mode_char(screen, codepoint, dump_callback); \
             break; \
@@ -1251,6 +1344,9 @@ END_ALLOW_CASE_RANGE
         case DCS: \
             if (accumulate_dcs(screen, codepoint, dump_callback)) { dispatch_dcs(screen, dump_callback); SET_STATE(0); watch_for_pending; } \
             if (screen->parser_state == ESC) { handle_esc_mode_char(screen, codepoint, dump_callback); break; } \
+            break; \
+        case SIXEL: \
+            if (accumulate_sixel(screen, codepoint)) { dispatch_sixel(screen, dump_callback); SET_STATE(ESC_ST); } \
             break; \
         default: \
             handle_normal_mode_char(screen, codepoint, dump_callback); \
